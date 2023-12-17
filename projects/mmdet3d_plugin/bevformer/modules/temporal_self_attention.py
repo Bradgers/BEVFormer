@@ -173,7 +173,8 @@ class TemporalSelfAttention(BaseModule):
         Returns:
              Tensor: forwarded results with shape [num_query, bs, embed_dims].
         """
-
+        # value = prev_bev query = bev_query
+        # 第一帧
         if value is None:
             assert self.batch_first
             bs, len_bev, c = query.shape
@@ -183,17 +184,20 @@ class TemporalSelfAttention(BaseModule):
 
         if identity is None:
             identity = query
+        # 添加上位置编码
         if query_pos is not None:
             query = query + query_pos
         if not self.batch_first:
             # change to (bs, num_query ,embed_dims)
             query = query.permute(1, 0, 2)
             value = value.permute(1, 0, 2)
-        bs,  num_query, embed_dims = query.shape
-        _, num_value, _ = value.shape
+        # query为当前帧(pos)
+        bs,  num_query, embed_dims = query.shape # (B, 200 * 200, 256)
+        # value包含历史帧
+        _, num_value, _ = value.shape # (B * 2, 200 * 200, 256)
         assert (spatial_shapes[:, 0] * spatial_shapes[:, 1]).sum() == num_value
         assert self.num_bev_queue == 2
-
+        # value[:bs] = prev_query
         query = torch.cat([value[:bs], query], -1)
         value = self.value_proj(value)
 
@@ -201,11 +205,11 @@ class TemporalSelfAttention(BaseModule):
             value = value.masked_fill(key_padding_mask[..., None], 0.0)
 
         value = value.reshape(bs*self.num_bev_queue,
-                              num_value, self.num_heads, -1)
+                              num_value, self.num_heads, -1) # (B * 2, 200 * 200, 8, 32)
 
-        sampling_offsets = self.sampling_offsets(query)
+        sampling_offsets = self.sampling_offsets(query) 
         sampling_offsets = sampling_offsets.view(
-            bs, num_query, self.num_heads,  self.num_bev_queue, self.num_levels, self.num_points, 2)
+            bs, num_query, self.num_heads,  self.num_bev_queue, self.num_levels, self.num_points, 2) # (B, 200 * 200, 8, 2, 1, 4, 2)
         attention_weights = self.attention_weights(query).view(
             bs, num_query,  self.num_heads, self.num_bev_queue, self.num_levels * self.num_points)
         attention_weights = attention_weights.softmax(-1)
@@ -217,13 +221,13 @@ class TemporalSelfAttention(BaseModule):
                                                    self.num_points)
 
         attention_weights = attention_weights.permute(0, 3, 1, 2, 4, 5)\
-            .reshape(bs*self.num_bev_queue, num_query, self.num_heads, self.num_levels, self.num_points).contiguous()
+            .reshape(bs*self.num_bev_queue, num_query, self.num_heads, self.num_levels, self.num_points).contiguous() # (B * 2, 200 * 200, 8, 1, 4)
         sampling_offsets = sampling_offsets.permute(0, 3, 1, 2, 4, 5, 6)\
-            .reshape(bs*self.num_bev_queue, num_query, self.num_heads, self.num_levels, self.num_points, 2)
+            .reshape(bs*self.num_bev_queue, num_query, self.num_heads, self.num_levels, self.num_points, 2) # (B * 2, 200 * 200, 8, 1, 4, 2)
 
         if reference_points.shape[-1] == 2:
             offset_normalizer = torch.stack(
-                [spatial_shapes[..., 1], spatial_shapes[..., 0]], -1)
+                [spatial_shapes[..., 1], spatial_shapes[..., 0]], -1) # (200, 200)
             sampling_locations = reference_points[:, :, None, :, None, :] \
                 + sampling_offsets \
                 / offset_normalizer[None, None, None, :, None, :]
@@ -254,12 +258,13 @@ class TemporalSelfAttention(BaseModule):
 
         # output shape (bs*num_bev_queue, num_query, embed_dims)
         # (bs*num_bev_queue, num_query, embed_dims)-> (num_query, embed_dims, bs*num_bev_queue)
-        output = output.permute(1, 2, 0)
+        output = output.permute(1, 2, 0) # (200 * 200, 256, B * 2)
 
         # fuse history value and current value
         # (num_query, embed_dims, bs*num_bev_queue)-> (num_query, embed_dims, bs, num_bev_queue)
-        output = output.view(num_query, embed_dims, bs, self.num_bev_queue)
-        output = output.mean(-1)
+        output = output.view(num_query, embed_dims, bs, self.num_bev_queue) # (200 * 200, 256, B, 2)
+        # 历史帧和当前帧进行合并
+        output = output.mean(-1) # (200 * 200, 256, B)
 
         # (num_query, embed_dims, bs)-> (bs, num_query, embed_dims)
         output = output.permute(2, 0, 1)

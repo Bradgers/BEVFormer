@@ -67,18 +67,18 @@ def create_nuscenes_infos(root_path,
 
     # filter existing scenes.
     available_scenes = get_available_scenes(nusc)
-    available_scene_names = [s['name'] for s in available_scenes]
+    available_scene_names = [s['name'] for s in available_scenes] # ["scene-0001", "scene-0002",..., "scene-1110"]
     train_scenes = list(
         filter(lambda x: x in available_scene_names, train_scenes))
     val_scenes = list(filter(lambda x: x in available_scene_names, val_scenes))
     train_scenes = set([
         available_scenes[available_scene_names.index(s)]['token']
         for s in train_scenes
-    ])
+    ]) # len: 700
     val_scenes = set([
         available_scenes[available_scene_names.index(s)]['token']
         for s in val_scenes
-    ])
+    ]) # len: 150
 
     test = 'test' in version
     if test:
@@ -86,7 +86,7 @@ def create_nuscenes_infos(root_path,
     else:
         print('train scene: {}, val scene: {}'.format(
             len(train_scenes), len(val_scenes)))
-
+    # 获取train和val的info信息
     train_nusc_infos, val_nusc_infos = _fill_trainval_infos(
         nusc, nusc_can_bus, train_scenes, val_scenes, test, max_sweeps=max_sweeps)
 
@@ -139,6 +139,7 @@ def get_available_scenes(nusc):
                 # path from lyftdataset is absolute path
                 lidar_path = lidar_path.split(f'{os.getcwd()}/')[-1]
                 # relative path
+            # 如果lidar point存在
             if not mmcv.is_filepath(lidar_path):
                 scene_not_exist = True
                 break
@@ -147,7 +148,7 @@ def get_available_scenes(nusc):
         if scene_not_exist:
             continue
         available_scenes.append(scene)
-    print('exist scene num: {}'.format(len(available_scenes)))
+    print('exist scene num: {}'.format(len(available_scenes))) # 850
     return available_scenes
 
 
@@ -201,10 +202,14 @@ def _fill_trainval_infos(nusc,
     frame_idx = 0
     for sample in mmcv.track_iter_progress(nusc.sample):
         lidar_token = sample['data']['LIDAR_TOP']
+        # lidar
         sd_rec = nusc.get('sample_data', sample['data']['LIDAR_TOP'])
+        # 标注
         cs_record = nusc.get('calibrated_sensor',
                              sd_rec['calibrated_sensor_token'])
+        # pose
         pose_record = nusc.get('ego_pose', sd_rec['ego_pose_token'])
+        # 获取lidar路径，bbox和内参
         lidar_path, boxes, _ = nusc.get_sample_data(lidar_token)
 
         mmcv.check_file_exist(lidar_path)
@@ -228,6 +233,7 @@ def _fill_trainval_infos(nusc,
         }
 
         if sample['next'] == '':
+            # 开始下一个序列
             frame_idx = 0
         else:
             frame_idx += 1
@@ -236,6 +242,7 @@ def _fill_trainval_infos(nusc,
         l2e_t = info['lidar2ego_translation']
         e2g_r = info['ego2global_rotation']
         e2g_t = info['ego2global_translation']
+        # 将四元数转换为矩阵
         l2e_r_mat = Quaternion(l2e_r).rotation_matrix
         e2g_r_mat = Quaternion(e2g_r).rotation_matrix
 
@@ -250,7 +257,9 @@ def _fill_trainval_infos(nusc,
         ]
         for cam in camera_types:
             cam_token = sample['data'][cam]
+            # 获取图片路径和内参
             cam_path, _, cam_intrinsic = nusc.get_sample_data(cam_token)
+            # 获取相机到Lidar的变换矩阵
             cam_info = obtain_sensor2top(nusc, cam_token, l2e_t, l2e_r_mat,
                                          e2g_t, e2g_r_mat, cam)
             cam_info.update(cam_intrinsic=cam_intrinsic)
@@ -260,10 +269,12 @@ def _fill_trainval_infos(nusc,
         sd_rec = nusc.get('sample_data', sample['data']['LIDAR_TOP'])
         sweeps = []
         while len(sweeps) < max_sweeps:
+            # 如果该sample前一帧有数据，则获取前一帧的sweep信息
             if not sd_rec['prev'] == '':
                 sweep = obtain_sensor2top(nusc, sd_rec['prev'], l2e_t,
                                           l2e_r_mat, e2g_t, e2g_r_mat, 'lidar')
                 sweeps.append(sweep)
+                # 更新为前一帧
                 sd_rec = nusc.get('sample_data', sd_rec['prev'])
             else:
                 break

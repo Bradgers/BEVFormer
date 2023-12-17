@@ -102,9 +102,9 @@ class BEVFormerHead(DETRHead):
 
         if not self.as_two_stage:
             self.bev_embedding = nn.Embedding(
-                self.bev_h * self.bev_w, self.embed_dims)
+                self.bev_h * self.bev_w, self.embed_dims) # (200 * 200, 256)
             self.query_embedding = nn.Embedding(self.num_query,
-                                                self.embed_dims * 2)
+                                                self.embed_dims * 2) # (900, 256 * 2)
 
     def init_weights(self):
         """Initialize weights of the DeformDETR head."""
@@ -138,9 +138,10 @@ class BEVFormerHead(DETRHead):
 
         bev_mask = torch.zeros((bs, self.bev_h, self.bev_w),
                                device=bev_queries.device).to(dtype)
-        bev_pos = self.positional_encoding(bev_mask).to(dtype)
+        bev_pos = self.positional_encoding(bev_mask).to(dtype) # (B, 256, 200, 200)
 
         if only_bev:  # only use encoder to obtain BEV features, TODO: refine the workaround
+            # 历史bev
             return self.transformer.get_bev_features(
                 mlvl_feats,
                 bev_queries,

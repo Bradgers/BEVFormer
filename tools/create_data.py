@@ -63,12 +63,14 @@ def nuscenes_data_prep(root_path,
 
     Args:
         root_path (str): Path of dataset root.
+        can_bus_root_path (str): Path of can_bus
         info_prefix (str): The prefix of info filenames.
         version (str): Dataset version.
         dataset_name (str): The dataset class name.
         out_dir (str): Output directory of the groundtruth database info.
         max_sweeps (int): Number of input consecutive frames. Default: 10
     """
+    # 生成pkl
     nuscenes_converter.create_nuscenes_infos(
         root_path, out_dir, can_bus_root_path, info_prefix, version=version, max_sweeps=max_sweeps)
 
